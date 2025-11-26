@@ -1,5 +1,7 @@
 <?php
 require_once __DIR__ . '/config.php'; // gunakan path absolut agar selalu terbaca
+require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/family_service.php';
 session_start();
 ob_start();
 
@@ -9,42 +11,20 @@ if (!isset($mysqli) || !$mysqli instanceof mysqli) {
 }
 
 /* load setting */
-$res = $mysqli->query("SELECT harga, beras, jagung FROM settings WHERE id=1");
-$setting = $res->fetch_assoc();
-if (!$setting) $setting = ['harga' => 35000, 'beras' => 3.5, 'jagung' => 2.0];
-
-/* load semua families + anggota */
-function get_all_families($mysqli)
-{
-    $out = [];
-    $fres = $mysqli->query("SELECT * FROM families ORDER BY id ASC");
-    while ($f = $fres->fetch_assoc()) {
-        $fid = $f['id'];
-        $mres = $mysqli->query("SELECT * FROM members WHERE family_id = " . intval($fid) . " ORDER BY id ASC");
-        $members = [];
-        while ($m = $mres->fetch_assoc()) $members[] = $m;
-        $f['anggota'] = $members;
-        $out[] = $f;
-    }
-    return $out;
-}
+$setting = fetch_settings($mysqli);
 
 /* HAPUS keluarga */
 if (isset($_POST['hapus_index'])) {
     $id = intval($_POST['hapus_index']);
     // foreign key dengan ON DELETE CASCADE akan hapus members otomatis
-    $stmt = $mysqli->prepare("DELETE FROM families WHERE id = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    $stmt->close();
+    delete_family($mysqli, $id);
     header("Location: lihat_data.php");
     exit;
 }
 
 /* RESET semua */
 if (isset($_POST['reset_semua'])) {
-    $mysqli->query("DELETE FROM members");
-    $mysqli->query("DELETE FROM families");
+    reset_all_families($mysqli);
     header("Location: lihat_data.php");
     exit;
 }
@@ -52,55 +32,19 @@ if (isset($_POST['reset_semua'])) {
 /* UPDATE keluarga (edit) */
 if (isset($_POST['update_index'])) {
     $fid = intval($_POST['update_index']);
-    $infaq = isset($_POST['infaq']) ? 15000 : 0;
+    $infaq = isset($_POST['infaq']) ? INFAQ_VALUE : 0;
 
-    // delete existing members for that family
-    $stmt = $mysqli->prepare("DELETE FROM members WHERE family_id = ?");
-    $stmt->bind_param("i", $fid);
-    $stmt->execute();
-    $stmt->close();
-
-    // insert new members from form (nama[], jk[], uang[], beras[], jagung[])
-    if (!empty($_POST['nama']) && is_array($_POST['nama'])) {
-        $stmt = $mysqli->prepare("INSERT INTO members (family_id, nama, jk, uang, beras, jagung) VALUES (?, ?, ?, ?, ?, ?)");
-        foreach ($_POST['nama'] as $i => $nama) {
-            if (trim($nama) === "") continue;
-            $jk = $_POST['jk'][$i] ?? '';
-            $uang = isset($_POST['uang'][$i]) ? 1 : 0;
-            $beras = isset($_POST['beras'][$i]) ? 1 : 0;
-            $jagung = isset($_POST['jagung'][$i]) ? 1 : 0;
-            $stmt->bind_param("issiii", $fid, $nama, $jk, $uang, $beras, $jagung);
-            $stmt->execute();
-        }
-        $stmt->close();
-    }
-
-    // update infaq on families row
-    $stmt = $mysqli->prepare("UPDATE families SET infaq = ? WHERE id = ?");
-    $stmt->bind_param("ii", $infaq, $fid);
-    $stmt->execute();
-    $stmt->close();
+    $members = collect_members_from_post($_POST);
+    replace_family($mysqli, $fid, $infaq, $members);
 
     header("Location: lihat_data.php");
     exit;
 }
 
 /* fetch data */
-$data = get_all_families($mysqli);
+$data = fetch_all_families($mysqli);
 
-/* totals overall */
-$totalUang = 0;
-$totalBeras = 0;
-$totalJagung = 0;
-$totalInfaq = 0;
-foreach ($data as $family) {
-    foreach ($family['anggota'] as $m) {
-        if (!empty($m['uang'])) $totalUang += $setting['harga'];
-        if (!empty($m['beras'])) $totalBeras += $setting['beras'];
-        if (!empty($m['jagung'])) $totalJagung += $setting['jagung'];
-    }
-    $totalInfaq += intval($family['infaq']);
-}
+$overallTotals = calculate_overall_totals($data, $setting);
 ?>
 <!doctype html>
 <html lang="id">
@@ -171,21 +115,11 @@ foreach ($data as $family) {
                         </form>
 
                         <div class="family-totals">
-                            <?php
-                            $u = 0;
-                            $b = 0;
-                            $jg = 0;
-                            $inf = intval($family['infaq']);
-                            foreach ($family['anggota'] as $m) {
-                                if (!empty($m['uang'])) $u += $setting['harga'];
-                                if (!empty($m['beras'])) $b += $setting['beras'];
-                                if (!empty($m['jagung'])) $jg += $setting['jagung'];
-                            }
-                            ?>
-                            <p>Total Uang: Rp <?= number_format($u, 0, ',', '.') ?></p>
-                            <p>Total Beras: <?= $b ?> kg</p>
-                            <p>Total Jagung: <?= $jg ?> kg</p>
-                            <p>Total Infaq: Rp <?= number_format($inf, 0, ',', '.') ?></p>
+                            <?php $familyTotals = calculate_family_totals($family, $setting); ?>
+                            <p>Total Uang: Rp <?= format_rupiah($familyTotals['uang']) ?></p>
+                            <p>Total Beras: <?= $familyTotals['beras'] ?> kg</p>
+                            <p>Total Jagung: <?= $familyTotals['jagung'] ?> kg</p>
+                            <p>Total Infaq: Rp <?= format_rupiah((float)$familyTotals['infaq']) ?></p>
                         </div>
 
                         <form method="post" onsubmit="return confirm('Hapus keluarga ini?')">
@@ -195,12 +129,12 @@ foreach ($data as $family) {
                     </div>
                 <?php endforeach; ?>
 
-                <div class="card totals-all">
-                    <h3>Total Keseluruhan</h3>
-                    <p>Total Uang: Rp <?= number_format($totalUang, 0, ',', '.') ?></p>
-                    <p>Total Beras: <?= $totalBeras ?> kg</p>
-                    <p>Total Jagung: <?= $totalJagung ?> kg</p>
-                    <p>Total Infaq: Rp <?= number_format($totalInfaq, 0, ',', '.') ?></p>
+                    <div class="card totals-all">
+                        <h3>Total Keseluruhan</h3>
+                        <p>Total Uang: Rp <?= format_rupiah($overallTotals['uang']) ?></p>
+                        <p>Total Beras: <?= $overallTotals['beras'] ?> kg</p>
+                        <p>Total Jagung: <?= $overallTotals['jagung'] ?> kg</p>
+                        <p>Total Infaq: Rp <?= format_rupiah((float)$overallTotals['infaq']) ?></p>
 
                     <form method="post" onsubmit="return confirm('Reset semua data?')">
                         <button type="submit" name="reset_semua" class="danger">🔄 Reset Semua Data</button>
