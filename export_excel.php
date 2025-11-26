@@ -1,19 +1,15 @@
 <?php
 session_start();
-require_once 'config.php';
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/helpers.php';
 
-// hanya admin login
-if (empty($_SESSION['username'])) {
-    echo "<script>alert('Anda harus login dahulu');</script>";
-    echo "<meta http-equiv='refresh' content='0;url=login.php'>";
-    exit;
-}
+require_login();
 
 $type = $_GET['type'] ?? 'summary';
-$setting = $mysqli->query("SELECT harga, beras, jagung FROM settings WHERE id=1")->fetch_assoc();
-$harga  = (float)($setting['harga'] ?? 0);
-$berasV = (float)($setting['beras'] ?? 0);
-$jagungV = (float)($setting['jagung'] ?? 0);
+$setting = fetch_settings($mysqli);
+$harga  = setting_value($setting, 'harga');
+$berasV = setting_value($setting, 'beras');
+$jagungV = setting_value($setting, 'jagung');
 
 $filename = "export_{$type}_" . date('Ymd_His') . ".xls";
 header("Content-Type: application/vnd.ms-excel; charset=UTF-8");
@@ -51,12 +47,6 @@ h2 {
 </style>
 CSS;
 
-// helper rupiah
-function fmt_rp($n)
-{
-    return number_format((float)$n, 0, ',', '.');
-}
-
 // =====================
 // MODE RINGKAS
 // =====================
@@ -93,10 +83,10 @@ if ($type === 'summary') {
             <td>{$no}</td>
             <td>{$r['kepala']}</td>
             <td>{$r['jumlah_anggota']}</td>
-            <td>" . fmt_rp($uangRp) . "</td>
+            <td>" . format_rupiah((float)$uangRp) . "</td>
             <td>{$beras}</td>
             <td>{$jagung}</td>
-            <td>" . fmt_rp($infaq) . "</td>
+            <td>" . format_rupiah((float)$infaq) . "</td>
         </tr>";
         $grandUang += $uangRp;
         $grandBeras += $beras;
@@ -107,10 +97,10 @@ if ($type === 'summary') {
 
     echo "<tr style='font-weight:bold;background:#fff59d;'>
         <td colspan='3'>TOTAL</td>
-        <td>" . fmt_rp($grandUang) . "</td>
+        <td>" . format_rupiah((float)$grandUang) . "</td>
         <td>{$grandBeras}</td>
         <td>{$grandJagung}</td>
-        <td>" . fmt_rp($grandInfaq) . "</td>
+        <td>" . format_rupiah((float)$grandInfaq) . "</td>
     </tr>";
 
     echo "</tbody></table>";
@@ -192,10 +182,10 @@ if ($type === 'detail') {
             <td>{$r['nama']}</td>
             <td>{$r['jk']}</td>
             <td>" . implode('+', $pilihan) . "</td>
-            <td>" . fmt_rp($uangRp) . "</td>
+            <td>" . format_rupiah((float)$uangRp) . "</td>
             <td>{$berasKg}</td>
             <td>{$jagungKg}</td>
-            <td>" . ($infaqOut ? fmt_rp($infaqOut) : '') . "</td>
+            <td>" . ($infaqOut ? format_rupiah((float)$infaqOut) : '') . "</td>
         </tr>";
         $no++;
     }
@@ -203,10 +193,10 @@ if ($type === 'detail') {
     // tambahkan baris total keseluruhan
     echo "<tr style='font-weight:bold; background:#fff59d;'>
         <td colspan='5' style='text-align:right;'>TOTAL KESELURUHAN</td>
-        <td>Rp " . fmt_rp($totalUang) . "</td>
+        <td>Rp " . format_rupiah((float)$totalUang) . "</td>
         <td>{$totalBeras}</td>
         <td>{$totalJagung}</td>
-        <td>Rp " . fmt_rp($totalInfaq) . "</td>
+        <td>Rp " . format_rupiah((float)$totalInfaq) . "</td>
     </tr>";
 
     echo "</tbody></table>";
