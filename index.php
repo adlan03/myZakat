@@ -4,22 +4,9 @@ ob_start();
 
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/family_service.php';
 
 require_login();
-
-/**
- * Apakah setting dalam kondisi terkunci.
- */
-function is_settings_locked(mysqli $db): bool
-{
-    $res = $db->query("SELECT locked FROM settings WHERE id=1");
-    if (!$res) {
-        return false;
-    }
-
-    $row = $res->fetch_assoc();
-    return isset($row['locked']) && (int)$row['locked'] === 1;
-}
 
 /**
  * Simpan perubahan setting dengan validasi lock.
@@ -38,10 +25,7 @@ function handle_setting_update(mysqli $db): void
     $beras = $beras !== false ? $beras : 0.0;
     $jagung = $jagung !== false ? $jagung : 0.0;
 
-    $stmt = $db->prepare("UPDATE settings SET harga=?, beras=?, jagung=? WHERE id=1");
-    $stmt->bind_param("idd", $harga, $beras, $jagung);
-    $stmt->execute();
-    $stmt->close();
+    update_settings($db, $harga, $beras, $jagung);
 
     redirect_to('index.php', 'ok=setting');
 }
@@ -51,41 +35,9 @@ function handle_setting_update(mysqli $db): void
  */
 function toggle_setting_lock(mysqli $db, bool $locked): void
 {
-    $stmt = $db->prepare("UPDATE settings SET locked=? WHERE id=1");
-    $lockVal = $locked ? 1 : 0;
-    $stmt->bind_param("i", $lockVal);
-    $stmt->execute();
-    $stmt->close();
+    set_setting_lock($db, $locked);
 
     redirect_to('index.php');
-}
-
-/**
- * Kompilasi data anggota dari request POST.
- */
-function collect_members(array $post): array
-{
-    $members = [];
-    if (empty($post['nama']) || !is_array($post['nama'])) {
-        return $members;
-    }
-
-    foreach ($post['nama'] as $i => $nama) {
-        $nama = trim((string)$nama);
-        if ($nama === '') {
-            continue;
-        }
-
-        $members[] = [
-            'nama'   => $nama,
-            'jk'     => $post['jk'][$i] ?? '',
-            'uang'   => isset($post['uang'][$i]) ? 1 : 0,
-            'beras'  => isset($post['beras'][$i]) ? 1 : 0,
-            'jagung' => isset($post['jagung'][$i]) ? 1 : 0,
-        ];
-    }
-
-    return $members;
 }
 
 /**
@@ -110,7 +62,7 @@ function resolve_head_name(array $names, mysqli $db): string
  */
 function handle_family_submission(mysqli $db): void
 {
-    $members = collect_members($_POST);
+    $members = collect_members_from_post($_POST);
     if (empty($members)) {
         redirect_to('index.php', 'err=empty');
     }
@@ -118,31 +70,7 @@ function handle_family_submission(mysqli $db): void
     $kepala = resolve_head_name($_POST['nama'] ?? [], $db);
     $infaq = isset($_POST['infaq']) ? INFAQ_VALUE : 0;
 
-    $stmt = $db->prepare("INSERT INTO families (kepala, infaq) VALUES (?, ?)");
-    $stmt->bind_param("si", $kepala, $infaq);
-    $stmt->execute();
-    $familyId = $stmt->insert_id;
-    $stmt->close();
-
-    $stmt = $db->prepare("
-        INSERT INTO members (family_id, nama, jk, uang, beras, jagung)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ");
-
-    foreach ($members as $member) {
-        $stmt->bind_param(
-            "issiii",
-            $familyId,
-            $member['nama'],
-            $member['jk'],
-            $member['uang'],
-            $member['beras'],
-            $member['jagung']
-        );
-        $stmt->execute();
-    }
-
-    $stmt->close();
+    save_family($db, $kepala, $infaq, $members);
 
     redirect_to('index.php', 'ok=saved');
 }

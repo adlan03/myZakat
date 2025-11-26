@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/config.php'; // gunakan path absolut agar selalu terbaca
 require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/family_service.php';
 session_start();
 ob_start();
 
@@ -12,84 +13,18 @@ if (!isset($mysqli) || !$mysqli instanceof mysqli) {
 /* load setting */
 $setting = fetch_settings($mysqli);
 
-/* load semua families + anggota */
-function get_all_families(mysqli $db): array
-{
-    $out = [];
-    $familyResult = $db->query("SELECT * FROM families ORDER BY id ASC");
-    if (!$familyResult) {
-        return $out;
-    }
-
-    while ($family = $familyResult->fetch_assoc()) {
-        $familyId = (int)$family['id'];
-        $memberResult = $db->query("SELECT * FROM members WHERE family_id = {$familyId} ORDER BY id ASC");
-        $members = [];
-        while ($memberResult && $member = $memberResult->fetch_assoc()) {
-            $members[] = $member;
-        }
-
-        $family['anggota'] = $members;
-        $out[] = $family;
-    }
-
-    return $out;
-}
-
-function calculate_family_totals(array $family, array $setting): array
-{
-    $totals = [
-        'uang' => 0.0,
-        'beras' => 0.0,
-        'jagung' => 0.0,
-        'infaq' => (int)($family['infaq'] ?? 0),
-    ];
-
-    foreach ($family['anggota'] as $member) {
-        if (!empty($member['uang'])) {
-            $totals['uang'] += setting_value($setting, 'harga');
-        }
-        if (!empty($member['beras'])) {
-            $totals['beras'] += setting_value($setting, 'beras');
-        }
-        if (!empty($member['jagung'])) {
-            $totals['jagung'] += setting_value($setting, 'jagung');
-        }
-    }
-
-    return $totals;
-}
-
-function calculate_overall_totals(array $families, array $setting): array
-{
-    $overall = ['uang' => 0.0, 'beras' => 0.0, 'jagung' => 0.0, 'infaq' => 0];
-    foreach ($families as $family) {
-        $familyTotals = calculate_family_totals($family, $setting);
-        $overall['uang'] += $familyTotals['uang'];
-        $overall['beras'] += $familyTotals['beras'];
-        $overall['jagung'] += $familyTotals['jagung'];
-        $overall['infaq'] += $familyTotals['infaq'];
-    }
-
-    return $overall;
-}
-
 /* HAPUS keluarga */
 if (isset($_POST['hapus_index'])) {
     $id = intval($_POST['hapus_index']);
     // foreign key dengan ON DELETE CASCADE akan hapus members otomatis
-    $stmt = $mysqli->prepare("DELETE FROM families WHERE id = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    $stmt->close();
+    delete_family($mysqli, $id);
     header("Location: lihat_data.php");
     exit;
 }
 
 /* RESET semua */
 if (isset($_POST['reset_semua'])) {
-    $mysqli->query("DELETE FROM members");
-    $mysqli->query("DELETE FROM families");
+    reset_all_families($mysqli);
     header("Location: lihat_data.php");
     exit;
 }
@@ -99,39 +34,15 @@ if (isset($_POST['update_index'])) {
     $fid = intval($_POST['update_index']);
     $infaq = isset($_POST['infaq']) ? INFAQ_VALUE : 0;
 
-    // delete existing members for that family
-    $stmt = $mysqli->prepare("DELETE FROM members WHERE family_id = ?");
-    $stmt->bind_param("i", $fid);
-    $stmt->execute();
-    $stmt->close();
-
-    // insert new members from form (nama[], jk[], uang[], beras[], jagung[])
-    if (!empty($_POST['nama']) && is_array($_POST['nama'])) {
-        $stmt = $mysqli->prepare("INSERT INTO members (family_id, nama, jk, uang, beras, jagung) VALUES (?, ?, ?, ?, ?, ?)");
-        foreach ($_POST['nama'] as $i => $nama) {
-            if (trim($nama) === "") continue;
-            $jk = $_POST['jk'][$i] ?? '';
-            $uang = isset($_POST['uang'][$i]) ? 1 : 0;
-            $beras = isset($_POST['beras'][$i]) ? 1 : 0;
-            $jagung = isset($_POST['jagung'][$i]) ? 1 : 0;
-            $stmt->bind_param("issiii", $fid, $nama, $jk, $uang, $beras, $jagung);
-            $stmt->execute();
-        }
-        $stmt->close();
-    }
-
-    // update infaq on families row
-    $stmt = $mysqli->prepare("UPDATE families SET infaq = ? WHERE id = ?");
-    $stmt->bind_param("ii", $infaq, $fid);
-    $stmt->execute();
-    $stmt->close();
+    $members = collect_members_from_post($_POST);
+    replace_family($mysqli, $fid, $infaq, $members);
 
     header("Location: lihat_data.php");
     exit;
 }
 
 /* fetch data */
-$data = get_all_families($mysqli);
+$data = fetch_all_families($mysqli);
 
 $overallTotals = calculate_overall_totals($data, $setting);
 ?>
