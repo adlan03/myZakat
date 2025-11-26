@@ -1,17 +1,13 @@
 <?php
 session_start();
-require_once 'config.php';
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/helpers.php';
 
 /* --- Ambil setting --- */
-$setting = $mysqli->query("SELECT harga, beras, jagung FROM settings WHERE id=1")->fetch_assoc();
-$harga  = (float)($setting['harga'] ?? 0);
-$berasV = (float)($setting['beras'] ?? 0);
-$jagungV = (float)($setting['jagung'] ?? 0);
-
-function fmt_rp($n)
-{
-    return number_format((float)$n, 0, ',', '.');
-}
+$setting = fetch_settings($mysqli);
+$harga  = setting_value($setting, 'harga');
+$berasV = setting_value($setting, 'beras');
+$jagungV = setting_value($setting, 'jagung');
 
 /* --- MODE PUBLIK (tanpa login) --- */
 if (empty($_SESSION['username'])) {
@@ -169,10 +165,10 @@ if (empty($_SESSION['username'])) {
                     <small>(+ <?= max(0, (int)$row['jumlah_anggota'] - 1); ?> orang)</small>
                 </td>
                 <td><?= (int)$row['jumlah_anggota']; ?></td>
-                <td><?= fmt_rp($uangRp); ?></td>
+                <td><?= format_rupiah((float)$uangRp); ?></td>
                 <td><?= $berasKg; ?></td>
                 <td><?= $jagungKg; ?></td>
-                <td><?= fmt_rp($infaq); ?></td>
+                <td><?= format_rupiah((float)$infaq); ?></td>
             </tr>
         <?php endwhile; ?>
     </table>
@@ -180,10 +176,10 @@ if (empty($_SESSION['username'])) {
     <?php if (empty($_SESSION['username'])): ?>
         <div class="total">
             <h3>Total Keseluruhan:</h3>
-            <p><strong>Uang:</strong> Rp <?= fmt_rp($total['total_uang'] ?? 0); ?></p>
+            <p><strong>Uang:</strong> Rp <?= format_rupiah((float)($total['total_uang'] ?? 0)); ?></p>
             <p><strong>Beras:</strong> <?= (float)($total['total_beras'] ?? 0); ?> kg</p>
             <p><strong>Jagung:</strong> <?= (float)($total['total_jagung'] ?? 0); ?> kg</p>
-            <p><strong>Infaq:</strong> Rp <?= fmt_rp($total['total_infaq'] ?? 0); ?></p>
+            <p><strong>Infaq:</strong> Rp <?= format_rupiah((float)($total['total_infaq'] ?? 0)); ?></p>
         </div>
     <?php endif; ?>
 

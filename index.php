@@ -2,113 +2,181 @@
 session_start();
 ob_start();
 
-// Wajib login
-if (empty($_SESSION['username'])) {
-    echo "<script>alert('Anda harus login terlebih dahulu');</script>";
-    echo "<meta http-equiv='refresh' content='0;url=login.php'>";
-    exit;
-}
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/helpers.php';
 
-require_once 'config.php';
+require_login();
 
-/* ----- helper: get setting ----- */
-function get_setting($mysqli)
+/**
+ * Apakah setting dalam kondisi terkunci.
+ */
+function is_settings_locked(mysqli $db): bool
 {
-    $sql = "SELECT harga, beras, jagung, locked FROM settings WHERE id = 1";
-    $res = $mysqli->query($sql);
-    if ($res && $row = $res->fetch_assoc()) return $row;
-    return ['harga' => 35000, 'beras' => 3.5, 'jagung' => 2.0, 'locked' => 0];
-}
-
-/* ----- update setting (enforce lock di server) ----- */
-if (isset($_POST['save_setting'])) {
-    $isLocked = (int)$mysqli->query("SELECT locked FROM settings WHERE id=1")->fetch_column();
-    if ($isLocked) {
-        header("Location: index.php?err=locked");
-        exit;
+    $res = $db->query("SELECT locked FROM settings WHERE id=1");
+    if (!$res) {
+        return false;
     }
 
-    $harga  = intval($_POST['harga'] ?? 0);
-    $beras  = floatval($_POST['beras'] ?? 0);
-    $jagung = floatval($_POST['jagung'] ?? 0);
+    $row = $res->fetch_assoc();
+    return isset($row['locked']) && (int)$row['locked'] === 1;
+}
 
-    $stmt = $mysqli->prepare("UPDATE settings SET harga=?, beras=?, jagung=? WHERE id=1");
+/**
+ * Simpan perubahan setting dengan validasi lock.
+ */
+function handle_setting_update(mysqli $db): void
+{
+    if (is_settings_locked($db)) {
+        redirect_to('index.php', 'err=locked');
+    }
+
+    $harga  = filter_var($_POST['harga'] ?? 0, FILTER_VALIDATE_INT);
+    $beras  = filter_var($_POST['beras'] ?? 0, FILTER_VALIDATE_FLOAT);
+    $jagung = filter_var($_POST['jagung'] ?? 0, FILTER_VALIDATE_FLOAT);
+
+    $harga = $harga !== false ? $harga : 0;
+    $beras = $beras !== false ? $beras : 0.0;
+    $jagung = $jagung !== false ? $jagung : 0.0;
+
+    $stmt = $db->prepare("UPDATE settings SET harga=?, beras=?, jagung=? WHERE id=1");
     $stmt->bind_param("idd", $harga, $beras, $jagung);
     $stmt->execute();
     $stmt->close();
 
-    header("Location: index.php?ok=setting");
-    exit;
+    redirect_to('index.php', 'ok=setting');
 }
 
-if (isset($_POST['lock'])) {
-    $mysqli->query("UPDATE settings SET locked=1 WHERE id=1");
-    header("Location: index.php");
-    exit;
-}
-if (isset($_POST['unlock'])) {
-    $mysqli->query("UPDATE settings SET locked=0 WHERE id=1");
-    header("Location: index.php");
-    exit; // <- diperbaiki (tadinya "index")
+/**
+ * Kunci atau buka kunci setting.
+ */
+function toggle_setting_lock(mysqli $db, bool $locked): void
+{
+    $stmt = $db->prepare("UPDATE settings SET locked=? WHERE id=1");
+    $lockVal = $locked ? 1 : 0;
+    $stmt->bind_param("i", $lockVal);
+    $stmt->execute();
+    $stmt->close();
+
+    redirect_to('index.php');
 }
 
-/* ----- simpan 1 keluarga dengan banyak anggota ----- */
-if (isset($_POST['simpan'])) {
-    // kompilasi anggota dari form
-    $anggota = [];
-    if (!empty($_POST['nama']) && is_array($_POST['nama'])) {
-        foreach ($_POST['nama'] as $i => $nama) {
-            $nama = trim($nama);
-            if ($nama === "") continue;
-            $anggota[] = [
-                'nama'   => $nama,
-                'jk'     => $_POST['jk'][$i] ?? '',
-                'uang'   => isset($_POST['uang'][$i]) ? 1 : 0,
-                'beras'  => isset($_POST['beras'][$i]) ? 1 : 0,
-                'jagung' => isset($_POST['jagung'][$i]) ? 1 : 0
-            ];
-        }
+/**
+ * Kompilasi data anggota dari request POST.
+ */
+function collect_members(array $post): array
+{
+    $members = [];
+    if (empty($post['nama']) || !is_array($post['nama'])) {
+        return $members;
     }
 
-    if (!empty($anggota)) {
-        // nama kepala keluarga = anggota pertama
-        $kepala = trim($_POST['nama'][0] ?? '');
-        if ($kepala === '') {
-            // fallback bila kosong
-            $res = $mysqli->query("SELECT COUNT(*) AS cnt FROM families");
-            $row = $res->fetch_assoc();
-            $nextIndex = intval($row['cnt']) + 1;
-            $kepala = "Kepala Keluarga " . $nextIndex;
+    foreach ($post['nama'] as $i => $nama) {
+        $nama = trim((string)$nama);
+        if ($nama === '') {
+            continue;
         }
 
-        // infaq opsional
-        $infaq = isset($_POST['infaq']) ? 15000 : 0;
+        $members[] = [
+            'nama'   => $nama,
+            'jk'     => $post['jk'][$i] ?? '',
+            'uang'   => isset($post['uang'][$i]) ? 1 : 0,
+            'beras'  => isset($post['beras'][$i]) ? 1 : 0,
+            'jagung' => isset($post['jagung'][$i]) ? 1 : 0,
+        ];
+    }
 
-        // simpan data keluarga
-        $stmt = $mysqli->prepare("INSERT INTO families (kepala, infaq) VALUES (?, ?)");
-        $stmt->bind_param("si", $kepala, $infaq);
+    return $members;
+}
+
+/**
+ * Tentukan nama kepala keluarga dengan fallback otomatis.
+ */
+function resolve_head_name(array $names, mysqli $db): string
+{
+    $candidate = trim($names[0] ?? '');
+    if ($candidate !== '') {
+        return $candidate;
+    }
+
+    $res = $db->query("SELECT COUNT(*) AS cnt FROM families");
+    $row = $res ? $res->fetch_assoc() : ['cnt' => 0];
+    $nextIndex = intval($row['cnt'] ?? 0) + 1;
+
+    return "Kepala Keluarga " . $nextIndex;
+}
+
+/**
+ * Simpan data keluarga beserta anggota.
+ */
+function handle_family_submission(mysqli $db): void
+{
+    $members = collect_members($_POST);
+    if (empty($members)) {
+        redirect_to('index.php', 'err=empty');
+    }
+
+    $kepala = resolve_head_name($_POST['nama'] ?? [], $db);
+    $infaq = isset($_POST['infaq']) ? INFAQ_VALUE : 0;
+
+    $stmt = $db->prepare("INSERT INTO families (kepala, infaq) VALUES (?, ?)");
+    $stmt->bind_param("si", $kepala, $infaq);
+    $stmt->execute();
+    $familyId = $stmt->insert_id;
+    $stmt->close();
+
+    $stmt = $db->prepare("
+        INSERT INTO members (family_id, nama, jk, uang, beras, jagung)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ");
+
+    foreach ($members as $member) {
+        $stmt->bind_param(
+            "issiii",
+            $familyId,
+            $member['nama'],
+            $member['jk'],
+            $member['uang'],
+            $member['beras'],
+            $member['jagung']
+        );
         $stmt->execute();
-        $family_id = $stmt->insert_id;
-        $stmt->close();
-
-        // simpan anggota
-        $stmt = $mysqli->prepare("
-            INSERT INTO members (family_id, nama, jk, uang, beras, jagung)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ");
-        foreach ($anggota as $m) {
-            $stmt->bind_param("issiii", $family_id, $m['nama'], $m['jk'], $m['uang'], $m['beras'], $m['jagung']);
-            $stmt->execute();
-        }
-        $stmt->close();
     }
 
-    header("Location: index.php?ok=saved");
-    exit;
+    $stmt->close();
+
+    redirect_to('index.php', 'ok=saved');
 }
+
+/**
+ * Dispatcher aksi POST agar kode utama lebih bersih.
+ */
+function handle_post_request(mysqli $db): void
+{
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        return;
+    }
+
+    if (isset($_POST['save_setting'])) {
+        handle_setting_update($db);
+    }
+
+    if (isset($_POST['lock'])) {
+        toggle_setting_lock($db, true);
+    }
+
+    if (isset($_POST['unlock'])) {
+        toggle_setting_lock($db, false);
+    }
+
+    if (isset($_POST['simpan'])) {
+        handle_family_submission($db);
+    }
+}
+
+handle_post_request($mysqli);
 
 /* ----- load setting untuk UI & JS ----- */
-$setting = get_setting($mysqli);
+$setting = fetch_settings($mysqli);
 ?>
 <!doctype html>
 <html lang="id">

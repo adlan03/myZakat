@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/config.php'; // gunakan path absolut agar selalu terbaca
+require_once __DIR__ . '/helpers.php';
 session_start();
 ob_start();
 
@@ -9,24 +10,68 @@ if (!isset($mysqli) || !$mysqli instanceof mysqli) {
 }
 
 /* load setting */
-$res = $mysqli->query("SELECT harga, beras, jagung FROM settings WHERE id=1");
-$setting = $res->fetch_assoc();
-if (!$setting) $setting = ['harga' => 35000, 'beras' => 3.5, 'jagung' => 2.0];
+$setting = fetch_settings($mysqli);
 
 /* load semua families + anggota */
-function get_all_families($mysqli)
+function get_all_families(mysqli $db): array
 {
     $out = [];
-    $fres = $mysqli->query("SELECT * FROM families ORDER BY id ASC");
-    while ($f = $fres->fetch_assoc()) {
-        $fid = $f['id'];
-        $mres = $mysqli->query("SELECT * FROM members WHERE family_id = " . intval($fid) . " ORDER BY id ASC");
-        $members = [];
-        while ($m = $mres->fetch_assoc()) $members[] = $m;
-        $f['anggota'] = $members;
-        $out[] = $f;
+    $familyResult = $db->query("SELECT * FROM families ORDER BY id ASC");
+    if (!$familyResult) {
+        return $out;
     }
+
+    while ($family = $familyResult->fetch_assoc()) {
+        $familyId = (int)$family['id'];
+        $memberResult = $db->query("SELECT * FROM members WHERE family_id = {$familyId} ORDER BY id ASC");
+        $members = [];
+        while ($memberResult && $member = $memberResult->fetch_assoc()) {
+            $members[] = $member;
+        }
+
+        $family['anggota'] = $members;
+        $out[] = $family;
+    }
+
     return $out;
+}
+
+function calculate_family_totals(array $family, array $setting): array
+{
+    $totals = [
+        'uang' => 0.0,
+        'beras' => 0.0,
+        'jagung' => 0.0,
+        'infaq' => (int)($family['infaq'] ?? 0),
+    ];
+
+    foreach ($family['anggota'] as $member) {
+        if (!empty($member['uang'])) {
+            $totals['uang'] += setting_value($setting, 'harga');
+        }
+        if (!empty($member['beras'])) {
+            $totals['beras'] += setting_value($setting, 'beras');
+        }
+        if (!empty($member['jagung'])) {
+            $totals['jagung'] += setting_value($setting, 'jagung');
+        }
+    }
+
+    return $totals;
+}
+
+function calculate_overall_totals(array $families, array $setting): array
+{
+    $overall = ['uang' => 0.0, 'beras' => 0.0, 'jagung' => 0.0, 'infaq' => 0];
+    foreach ($families as $family) {
+        $familyTotals = calculate_family_totals($family, $setting);
+        $overall['uang'] += $familyTotals['uang'];
+        $overall['beras'] += $familyTotals['beras'];
+        $overall['jagung'] += $familyTotals['jagung'];
+        $overall['infaq'] += $familyTotals['infaq'];
+    }
+
+    return $overall;
 }
 
 /* HAPUS keluarga */
@@ -52,7 +97,7 @@ if (isset($_POST['reset_semua'])) {
 /* UPDATE keluarga (edit) */
 if (isset($_POST['update_index'])) {
     $fid = intval($_POST['update_index']);
-    $infaq = isset($_POST['infaq']) ? 15000 : 0;
+    $infaq = isset($_POST['infaq']) ? INFAQ_VALUE : 0;
 
     // delete existing members for that family
     $stmt = $mysqli->prepare("DELETE FROM members WHERE family_id = ?");
@@ -88,19 +133,7 @@ if (isset($_POST['update_index'])) {
 /* fetch data */
 $data = get_all_families($mysqli);
 
-/* totals overall */
-$totalUang = 0;
-$totalBeras = 0;
-$totalJagung = 0;
-$totalInfaq = 0;
-foreach ($data as $family) {
-    foreach ($family['anggota'] as $m) {
-        if (!empty($m['uang'])) $totalUang += $setting['harga'];
-        if (!empty($m['beras'])) $totalBeras += $setting['beras'];
-        if (!empty($m['jagung'])) $totalJagung += $setting['jagung'];
-    }
-    $totalInfaq += intval($family['infaq']);
-}
+$overallTotals = calculate_overall_totals($data, $setting);
 ?>
 <!doctype html>
 <html lang="id">
@@ -171,21 +204,11 @@ foreach ($data as $family) {
                         </form>
 
                         <div class="family-totals">
-                            <?php
-                            $u = 0;
-                            $b = 0;
-                            $jg = 0;
-                            $inf = intval($family['infaq']);
-                            foreach ($family['anggota'] as $m) {
-                                if (!empty($m['uang'])) $u += $setting['harga'];
-                                if (!empty($m['beras'])) $b += $setting['beras'];
-                                if (!empty($m['jagung'])) $jg += $setting['jagung'];
-                            }
-                            ?>
-                            <p>Total Uang: Rp <?= number_format($u, 0, ',', '.') ?></p>
-                            <p>Total Beras: <?= $b ?> kg</p>
-                            <p>Total Jagung: <?= $jg ?> kg</p>
-                            <p>Total Infaq: Rp <?= number_format($inf, 0, ',', '.') ?></p>
+                            <?php $familyTotals = calculate_family_totals($family, $setting); ?>
+                            <p>Total Uang: Rp <?= format_rupiah($familyTotals['uang']) ?></p>
+                            <p>Total Beras: <?= $familyTotals['beras'] ?> kg</p>
+                            <p>Total Jagung: <?= $familyTotals['jagung'] ?> kg</p>
+                            <p>Total Infaq: Rp <?= format_rupiah((float)$familyTotals['infaq']) ?></p>
                         </div>
 
                         <form method="post" onsubmit="return confirm('Hapus keluarga ini?')">
@@ -195,12 +218,12 @@ foreach ($data as $family) {
                     </div>
                 <?php endforeach; ?>
 
-                <div class="card totals-all">
-                    <h3>Total Keseluruhan</h3>
-                    <p>Total Uang: Rp <?= number_format($totalUang, 0, ',', '.') ?></p>
-                    <p>Total Beras: <?= $totalBeras ?> kg</p>
-                    <p>Total Jagung: <?= $totalJagung ?> kg</p>
-                    <p>Total Infaq: Rp <?= number_format($totalInfaq, 0, ',', '.') ?></p>
+                    <div class="card totals-all">
+                        <h3>Total Keseluruhan</h3>
+                        <p>Total Uang: Rp <?= format_rupiah($overallTotals['uang']) ?></p>
+                        <p>Total Beras: <?= $overallTotals['beras'] ?> kg</p>
+                        <p>Total Jagung: <?= $overallTotals['jagung'] ?> kg</p>
+                        <p>Total Infaq: Rp <?= format_rupiah((float)$overallTotals['infaq']) ?></p>
 
                     <form method="post" onsubmit="return confirm('Reset semua data?')">
                         <button type="submit" name="reset_semua" class="danger">🔄 Reset Semua Data</button>
