@@ -1,9 +1,11 @@
 <?php
-require_once __DIR__ . '/config.php'; // gunakan path absolut agar selalu terbaca
-require_once __DIR__ . '/helpers.php';
-require_once __DIR__ . '/family_service.php';
-session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 ob_start();
+require_once dirname(__DIR__, 2) . '/config/config.php';
+require_once dirname(__DIR__) . '/Helpers/helpers.php';
+require_once __DIR__ . '/family_service.php';
 
 // pastikan koneksi tersedia
 if (!isset($mysqli) || !$mysqli instanceof mysqli) {
@@ -18,14 +20,14 @@ if (isset($_POST['hapus_index'])) {
     $id = intval($_POST['hapus_index']);
     // foreign key dengan ON DELETE CASCADE akan hapus members otomatis
     delete_family($mysqli, $id);
-    header("Location: lihat_data.php");
+    header("Location: index.php?page=lihat_data");
     exit;
 }
 
 /* RESET semua */
 if (isset($_POST['reset_semua'])) {
     reset_all_families($mysqli);
-    header("Location: lihat_data.php");
+    header("Location: index.php?page=lihat_data");
     exit;
 }
 
@@ -37,7 +39,7 @@ if (isset($_POST['update_index'])) {
     $members = collect_members_from_post($_POST);
     replace_family($mysqli, $fid, $infaq, $members);
 
-    header("Location: lihat_data.php");
+    header("Location: index.php?page=lihat_data");
     exit;
 }
 
@@ -53,7 +55,7 @@ $overallTotals = calculate_overall_totals($data, $setting);
     <meta charset="utf-8">
     <title>Lihat Data - Infaq</title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="assets/css/style.css">
 </head>
 
 <body>
@@ -139,8 +141,8 @@ $overallTotals = calculate_overall_totals($data, $setting);
                     <form method="post" onsubmit="return confirm('Reset semua data?')">
                         <button type="submit" name="reset_semua" class="danger">🔄 Reset Semua Data</button>
                         <div class="row" style="margin:12px 0;">
-                            <a class="button" href="export_excel.php?type=summary">⬇️ Export Ringkas (CSV)</a>
-                            <a class="button" href="export_excel.php?type=detail">⬇️ Export Detail (CSV)</a>
+                            <a class="button" href="index.php?page=export_excel&type=summary">⬇️ Export Ringkas (CSV)</a>
+                            <a class="button" href="index.php?page=export_excel&type=detail">⬇️ Export Detail (CSV)</a>
                       </div>
                     </form>
 

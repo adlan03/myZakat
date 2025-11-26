@@ -1,6 +1,8 @@
 <?php
-session_start();
-include 'config.php';
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+require_once dirname(__DIR__, 2) . '/config/config.php';
 
 $username = $_POST['username'];
 $password = md5($_POST['password']);
@@ -13,7 +15,7 @@ $result = $stmt->get_result();
 if ($result->num_rows === 1) {
     $_SESSION['login'] = 1;
     $_SESSION['username'] = $username;
-    header('location:index.php');
+    header('Location: index.php');
     exit;
 } else {
     echo "<script>alert('Username atau password salah');</script>";

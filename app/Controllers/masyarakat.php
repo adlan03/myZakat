@@ -1,7 +1,9 @@
 <?php
-session_start();
-require_once __DIR__ . '/config.php';
-require_once __DIR__ . '/helpers.php';
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+require_once dirname(__DIR__, 2) . '/config/config.php';
+require_once dirname(__DIR__) . '/Helpers/helpers.php';
 
 /* --- Ambil setting --- */
 $setting = fetch_settings($mysqli);
@@ -107,7 +109,7 @@ $totalFamilies = count($families);
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
     <title>Platform Zakat Harmoni</title>
-    <link rel="stylesheet" href="public.css">
+    <link rel="stylesheet" href="assets/css/public.css">
 </head>
 
 <body>

@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login Aplikasi Zakat</title>
-    <link rel="stylesheet" href="login.css">
+    <link rel="stylesheet" href="assets/css/login.css">
     <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
 </head>
 
@@ -22,7 +22,7 @@
         <!-- Bagian kanan (form login) -->
         <section class="login-box">
             <h2>Login Aplikasi</h2>
-            <form method="post" action="ceklogin.php">
+            <form method="post" action="index.php?page=ceklogin">
                 <div class="input-group">
                     <i class="fas fa-user"></i>
                     <input type="text" placeholder="Username" name="username" required>
@@ -35,7 +35,7 @@
             </form>
             <div class="user_masyarakat">
                 <label for="masyarakat">Lihat Data Sebagai Masyarakat</label>
-                <button type="button" onclick="window.location.href='masyarakat.php'">Klik Ini</button>
+                <button type="button" onclick="window.location.href='index.php?page=masyarakat'">Klik Ini</button>
             </div>
 
         </section>

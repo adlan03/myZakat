@@ -1,9 +1,11 @@
 <?php
-session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 ob_start();
 
-require_once __DIR__ . '/config.php';
-require_once __DIR__ . '/helpers.php';
+require_once dirname(__DIR__, 2) . '/config/config.php';
+require_once dirname(__DIR__) . '/Helpers/helpers.php';
 require_once __DIR__ . '/family_service.php';
 
 require_login();
@@ -113,7 +115,7 @@ $setting = fetch_settings($mysqli);
     <meta charset="utf-8">
     <title>Dashboard - Input Keluarga (MySQL)</title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="assets/css/style.css">
 </head>
 
 <body>
@@ -122,8 +124,8 @@ $setting = fetch_settings($mysqli);
     <div class="container">
         <aside>
             <ul class="menu">
-                <li><a href="dashboard.php" class="active">Dashboard</a></li>
-                <li><a href="lihat_data.php">Lihat / Edit Data</a></li>
+                <li><a href="index.php" class="active">Dashboard</a></li>
+                <li><a href="index.php?page=lihat_data">Lihat / Edit Data</a></li>
                 <li><a href="logout.php">Keluar</a></li>
             </ul>
         </aside>
@@ -220,7 +222,7 @@ $setting = fetch_settings($mysqli);
             infaqValue: 15000
         };
     </script>
-    <script src="keluarga.js"></script>
+    <script src="assets/js/keluarga.js"></script>
 </body>
 
 </html>

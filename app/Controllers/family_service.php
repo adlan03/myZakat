@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/helpers.php';
+require_once dirname(__DIR__) . '/Helpers/helpers.php';
 
 /**
  * Kumpulan fungsi layanan untuk operasi keluarga dan pengaturan.
